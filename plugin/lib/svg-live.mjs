@@ -123,10 +123,10 @@ const NEEDY = new Set(['asking', 'error', 'stopped'])
 // round them in their color (svg-kit tagsSvg `mark`), so what is yours to do stands out down the whole building, the
 // desks at work left plain; the building's bar counts them as 'need you'
 const YOURS = new Set([...NEEDY, 'done'])
-// The slab under a row of desks whose lines are drawn: the carpet's edge (CARPET), its two rows of tags (svg-kit
-// tagH(2), 15) under it and a little slab under them, so each floor's tags sit on their own floor, clear of the
-// nameplates of the floor below (the kit's SLAB, 18, left a unit)
-export const DECK = 22
+// The slab under a row of desks whose lines are drawn: the carpet's edge (CARPET), its three rows of tags (title,
+// account, activity: svg-kit tagH(3), 22) under it and a little slab under them, so each floor's tags sit on their own
+// floor, clear of the nameplates of the floor below
+export const DECK = 29
 // The slab under a row of desks none of whose lines are drawn: a plain floor instead of DECK's label band
 const THIN = 5
 // The wall a room has over each row of desks besides the row itself: air over the agents, and room for a raised hand's
