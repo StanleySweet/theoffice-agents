@@ -1006,7 +1006,8 @@ function deskTag(ctx, d, x, y, w) {
   // its time after its words where the tag has room for it whole (a row of five or six desks may not), else its words
   const [words, time] = brief(ctx, d)
   const said = time && tagFits(`${words} · ${time}`, w, mark) ? `${words} · ${time}` : words
-  ctx.tags.push({ x, y, w, mark, rows: [[...(d.account ? [[`@${d.account}`, accountColor(d.account)]] : []), [name, d.cls === 'dozing' ? ROLE.dim : ROLE.title]],
+  // the title leads: a narrow tag fits what comes first, and the session's own name is what the tag is for (the account follows when there is room)
+  ctx.tags.push({ x, y, w, mark, rows: [[[name, d.cls === 'dozing' ? ROLE.dim : ROLE.title], ...(d.account ? [[`@${d.account}`, accountColor(d.account)]] : [])],
     [[said, CLASS_COLOR[d.cls]]]] })
 }
 
