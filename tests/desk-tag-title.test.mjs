@@ -12,9 +12,12 @@ const desk = (title, account) => ({
 const facts = (d) => ({ spec: 'x', generated_at: NOW, now: { iso: NOW, ms: Date.parse(NOW) }, range: { kind: 'live', from: NOW, to: NOW }, live: { desks: [d], recently_left: [] },
   projects: [], accounts: [{ id: 'stan', label: 'stan' }], totals: {}, per_day: {}, per_hour: {} })
 
-test('a long session title is drawn on the tag, before the account', () => {
+test('a long session title is drawn on the tag, with the account on its own line under it', () => {
   const svg = renderSvg(facts(desk('Fix the omp title parser', 'stan')), { view: 'live', width: 1100, animate: false })
-  const tag = [...svg.matchAll(/<text[^>]*>(.*?)<\/text>/g)].map((m) => m[1].replace(/<[^>]+>/g, '')).find((t) => /Fix the/.test(t))
-  assert.ok(tag, 'the title appears as tag text')
-  assert.ok(tag.indexOf('Fix') < (tag.includes('@stan') ? tag.indexOf('@stan') : Infinity), 'the title leads the account')
+  const texts = [...svg.matchAll(/<text[^>]*y="([\d.]+)"[^>]*>(.*?)<\/text>/g)].map((m) => ({ y: Number(m[1]), t: m[2].replace(/<[^>]+>/g, '') }))
+  const title = texts.find((t) => /Fix the/.test(t.t))
+  const account = texts.find((t) => t.t === '@stan')
+  assert.ok(title, 'the title appears as tag text')
+  assert.ok(account, 'the account appears on its own line')
+  assert.ok(account.y > title.y, 'the account is under the title')
 })

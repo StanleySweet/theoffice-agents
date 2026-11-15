@@ -1006,9 +1006,9 @@ function deskTag(ctx, d, x, y, w) {
   // its time after its words where the tag has room for it whole (a row of five or six desks may not), else its words
   const [words, time] = brief(ctx, d)
   const said = time && tagFits(`${words} · ${time}`, w, mark) ? `${words} · ${time}` : words
-  // the title leads: a narrow tag fits what comes first, and the session's own name is what the tag is for (the account follows when there is room)
-  ctx.tags.push({ x, y, w, mark, rows: [[[name, d.cls === 'dozing' ? ROLE.dim : ROLE.title], ...(d.account ? [[`@${d.account}`, accountColor(d.account)]] : [])],
-    [[said, CLASS_COLOR[d.cls]]]] })
+  // three lines: the session's own title, its account, what it is at (a narrow tag fits a line, not a title and an account together)
+  ctx.tags.push({ x, y, w, mark, rows: [[[name, d.cls === 'dozing' ? ROLE.dim : ROLE.title]],
+    ...(d.account ? [[[`@${d.account}`, accountColor(d.account)]]] : []), [[said, CLASS_COLOR[d.cls]]]] })
 }
 
 // The card a desk shows while the pointer rests on it (the lines a desk that needs you writes under it): its title, what
