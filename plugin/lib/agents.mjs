@@ -1214,9 +1214,15 @@ export function opencodeEntry(e, msgs) {
  *       for each `c` of `m.content` (when an array) with `c.type === 'toolCall'`: `bookTool(e, b, c.name, c.arguments)`;
  *     any role: when `e.cwd0` and `gap = prev != null && ms > prev ? Math.min(ms - prev, GAP_MS) : 0` is > 0,
  *       `e.cm[e.cwd0][day] += gap` (create `e.cm`, `e.cm[e.cwd0]` as needed);
+ *   - `o.type === 'title'` with a non-empty string `o.title` (omp writes it once it has named the session; early lines are empty):
+ *     `e.ct = clip(redact(o.title), 80)`, the last one wins; nothing else;
  *   - any other type: nothing.
  */
 export function ompLine(e, o) {
+  if (o.type === 'title') {
+    if (typeof o.title === 'string' && o.title.trim()) e.ct = clip(redact(o.title), 80)
+    return e
+  }
   if (o.type === 'session') {
     if (typeof o.cwd === 'string') {
       e.cwd0 = o.cwd

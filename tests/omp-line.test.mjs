@@ -33,3 +33,10 @@ test('a subagent books no prompt; other line types and bad timestamps book nothi
   assert.equal(e.days[DAY].p, 0)
   assert.deepEqual(e.models, {})
 })
+
+test('the session title becomes the desk title: the last non-empty one wins, empty ones are ignored', () => {
+  const e = run(entry(), [session, { type: 'title', title: '' }, { type: 'title', title: 'Add agent_wait' }, { type: 'title', title: '  ' }])
+  assert.equal(e.ct, 'Add agent_wait')
+  assert.equal(run(entry(), [session, { type: 'title', title: 'Newer' }, { type: 'title', title: 'Newest' }]).ct, 'Newest')
+  assert.equal(run(entry(), [session]).ct, undefined)
+})
