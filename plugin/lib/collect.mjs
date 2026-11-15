@@ -2155,6 +2155,8 @@ export function collectCopilot(ctx, root) {
       if (m) meta[m[1]] = m[2].trim().replace(/^(["'])(.*)\1$/, '$2')
     }
     if (!meta.cwd && !meta.git_root) continue   // not a workspace.yaml of a session
+    // A block scalar (`name: |-` then the text indented) is the raw multi-line prompt of a `-p` run, not a title: never shown.
+    if (/^[|>][+-]?$/.test(meta.name ?? '')) delete meta.name
     const newest = Math.max(0, ...readdirSafe(dir).map((f) => statSafe(path.join(dir, f.name))?.mtimeMs ?? 0))
     const createdAt = Date.parse(meta.created_at)
     const lastTs = Math.max(Date.parse(meta.updated_at) || 0, createdAt || 0, newest)
