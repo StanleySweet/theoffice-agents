@@ -40,3 +40,11 @@ test('the session title becomes the desk title: the last non-empty one wins, emp
   assert.equal(run(entry(), [session, { type: 'title', title: 'Newer' }, { type: 'title', title: 'Newest' }]).ct, 'Newest')
   assert.equal(run(entry(), [session]).ct, undefined)
 })
+
+test('without a title of its own, the first line of the first prompt is the desk title; a real title replaces it', () => {
+  const u = (min, content) => ({ type: 'message', message: { role: 'user', timestamp: T0 + min * MIN, content } })
+  assert.equal(run(entry(), [session, u(0, [{ type: 'text', text: '\nSite docs, left panel\nmore detail' }]), u(1, 'a later prompt')]).ct, 'Site docs, left panel')
+  assert.equal(run(entry(), [session, u(0, 'A string prompt\nsecond line')]).ct, 'A string prompt')
+  assert.equal(run(entry(), [session, u(0, 'Prompt line'), { type: 'title', title: 'Named by omp' }]).ct, 'Named by omp')
+  assert.equal(run(entry('sub'), [session, u(0, 'A subagent prompt')]).ct, undefined, 'a subagent books no title')
+})

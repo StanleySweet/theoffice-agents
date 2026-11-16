@@ -1216,6 +1216,8 @@ export function opencodeEntry(e, msgs) {
  *       `e.cm[e.cwd0][day] += gap` (create `e.cm`, `e.cm[e.cwd0]` as needed);
  *   - `o.type === 'title'` with a non-empty string `o.title` (omp writes it once it has named the session; early lines are empty):
  *     `e.ct = clip(redact(o.title), 80)`, the last one wins; nothing else;
+ *   - `o.type === 'message'`, role 'user', `e.kind === 'main'` and no `e.ct` yet: `e.ct` is the first non-empty line of that message's
+ *     text (a string `content`, or the first `text` part of an array), `clip(redact(line.trim()), 80)`; a later `title` line replaces it;
  *   - any other type: nothing.
  */
 export function ompLine(e, o) {
@@ -1232,6 +1234,12 @@ export function ompLine(e, o) {
   }
   if (o.type !== 'message') return e
   const m = o.message
+  // no title of its own (omp names a session with small local models, which not everyone has): the first line of the first prompt
+  if (m?.role === 'user' && e.kind === 'main' && !e.ct) {
+    const text = typeof m.content === 'string' ? m.content : m.content?.find?.((c) => c?.type === 'text')?.text
+    const line = typeof text === 'string' ? text.split('\n').find((l) => l.trim()) : null
+    if (line) e.ct = clip(redact(line.trim()), 80)
+  }
   const ms = msOf(m.timestamp ?? o.timestamp)
   if (!Number.isFinite(ms)) return e
   const prev = e.prev

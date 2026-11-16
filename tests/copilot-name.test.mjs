@@ -21,7 +21,8 @@ function home(nameLines) {
 const titleOf = (nameLines) => collectCopilot({ nowMs: NOW, resolver, skipCwd: true }, home(nameLines))[0].title
 
 test('a one-line name is the desk title', () => assert.equal(titleOf(['name: Analyze MQTT repo']), 'Analyze MQTT repo'))
-test('a block-scalar name (a raw prompt) falls back to the project', () => {
-  assert.equal(titleOf(['name: |-', '  do NOT start any workflow', '  second line']), 'proj')
-  assert.equal(titleOf(['name: >', '  folded prompt']), 'proj')
+test('a block-scalar name (a -p prompt) gives its first line as the title', () => {
+  assert.equal(titleOf(['name: |-', '  Site docs, left panel', '  second line']), 'Site docs, left panel')
+  assert.equal(titleOf(['name: >', '', '  folded prompt']), 'folded prompt')
+  assert.equal(titleOf(['name: |-']), 'proj', 'an empty block falls back to the project')
 })
