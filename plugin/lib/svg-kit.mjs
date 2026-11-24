@@ -4,7 +4,7 @@
 // (svg-live.mjs, svg-week.mjs, svg-today.mjs, svg-month.mjs, svg-work.mjs) and the street under them (svg-street.mjs)
 // import from here so every scene speaks the same visual language; lib/svg.mjs picks one per view. No
 // node:* imports: the desktop mod hooks module (no Node, no DOM) imports svg.mjs, which imports this file.
-import { AGENT_IDS, CAST, agentId } from './cast.mjs'
+import { AGENT_IDS, CAST, CAST_NIGHT, agentId } from './cast.mjs'
 import { clip, displayWidth, fmtAgo, fmtAgoAtLeast, fmtAtLeast, fmtCount, fmtMinutes, truncate } from './format.mjs'
 import { CLAWD_HEX, CLAWD_SPRITE, ROLE_HEX, STRIP_ORDER, agentShares, fnv1a, handsUp, idleGroups, plural, projectSlots, seeded } from './model.mjs'
 import { THEME } from './scenery.mjs'
@@ -102,7 +102,15 @@ function partsOf(ch) {
     eyes: cut(() => true, eyes, eyeGrid),
   }
 }
-const PARTS = Object.fromEntries(AGENT_IDS.map((a) => [a, partsOf(CAST[a])]))
+// every character drawn: the cast and its small hours' twins
+const CHARS = [...AGENT_IDS.map((a) => CAST[a]), ...Object.values(CAST_NIGHT)]
+const PARTS = Object.fromEntries(CHARS.map((ch) => [ch.id, partsOf(ch)]))
+/** A character as a drawing shows it: its small hours' twin between 00:00 and 04:59 of a live one (not a replay). */
+const nightOf = (c, agent) => {
+  const ch = CAST[agentId(agent)]
+  const h = c.f?.now?.hour
+  return CAST_NIGHT[ch.id] && c.view !== 'timelapse' && Number.isInteger(h) && h >= 0 && h < 5 ? CAST_NIGHT[ch.id] : ch
+}
 /** CLAWD_15 cut into parts ([x, y, w, h] rects): body, armL, armR, legs, eyes, so a pose can move arms and eyes. */
 export const CL = Object.fromEntries(Object.entries(PARTS.claude).map(([k, rs]) => [k, rs.map(([x, y, w, h]) => [x, y, w, h])]))
 // Mini Clawd for interns (about half size, 11 × 6) and a micro one for the facade's tiny cells (7 × 5).
@@ -571,14 +579,17 @@ const mirror = (rs) => rs.map(([x, y, w, h]) => [25 - x - w, y, w, h])
  * it per figure: `{ 'wk-cheer': (c) => clawd(c, …) }`, or one per character with castSprites.
  */
 export function figure(c, agent, { look = [0, 0], shut = false, arms = ['out', 'out'], legs = false, sink = 0, blinkAt = null, typeDur = 0.5, typeAt = 0, lit = false } = {}) {
-  const ch = CAST[agentId(agent)]
+  const ch = nightOf(c, agent)
   const P = PARTS[ch.id]
   const ARMS = ch.arms ?? ARM // a character may bring its own arm shapes (a narrow body wants narrow arms)
   const reach = ch.reach ?? 2
   const [lx, ly] = look.map((v) => Math.max(-reach, Math.min(reach, v)))
   const armFill = [].concat(ch.arm)
   const walking = legs === 'walk' && c.animate
+  const stepping = walking && !ch.float // a floater (Vex) keeps its feet still and bobs instead
+  const bob = (g) => (walking && ch.float ? `<g>${g}${aT(c, '0 0;0 -1', 0.5)}</g>` : g)
   let s
+  let shadow = ''
   if (fine(c)) {
     // The finer art: the figure put together from the cast's shared parts, as the live floors' are, so every figure of a
     // drawing is lit alike and a pose is a handful of <use>s (a body is drawn once, however many poses show it): its
@@ -587,28 +598,29 @@ export function figure(c, agent, { look = [0, 0], shut = false, arms = ['out', '
     const plain = Boolean(c.caps?.art)
     const loop = (a, side) => (!c.animate ? null : a === 'type' ? (typeAt ? 'B' : 'A') : a === 'high' && side ? 'W' : null)
     const arm = (side) => use(c, armName(arms[side] === 'type' ? 'out' : arms[side], side, loop(arms[side], side), shut, plain, ch.arms ? `${ch.tag}-` : ''), 0, sink, ` color="${armFill[side] ?? armFill[0]}"`)
-    s = (lit ? paint([[5, 15 + sink, 18, 1, '#000/.3']]) : '') + use(c, `${ch.tag}-${shut ? 'dim' : 'lit'}`, 0, sink) +
-      (legs ? use(c, `${ch.tag}-${walking ? 'walk' : 'legs'}`, 0, sink) : '') + arm(0) + arm(1)
+    shadow = lit ? paint([[5, 15 + sink, 18, 1, '#000/.3']]) : '' // on the ground: a floater does not bob it
+    s = use(c, `${ch.tag}-${shut ? 'dim' : 'lit'}`, 0, sink) +
+      (legs ? use(c, `${ch.tag}-${stepping ? 'walk' : 'legs'}`, 0, sink) : '') + arm(0) + arm(1)
     // its eyes the cast's too, where its look is one of the live floors' (FIGURE_EYES): they blink by themselves
     const eyes = Object.keys(FIGURE_EYES).find((k) => {
       const e = FIGURE_EYES[k]
       return (e.look?.[0] ?? 0) === look[0] && (e.look?.[1] ?? 0) === look[1] && (e.sink ?? 0) === sink && Boolean(e.shut) === shut
     })
-    if (eyes) return s + eyesOf(c, ch, eyes, 0, 0, c.animate && blinkAt != null && !shut)
+    if (eyes) return shadow + bob(s + eyesOf(c, ch, eyes, 0, 0, c.animate && blinkAt != null && !shut))
   } else {
     const armRects = arms.map((a, side) => at(side ? mirror(ARMS[a]) : ARMS[a], 0, sink, armFill[side] ?? armFill[0]))
     const moving = arms.map((a) => c.animate && (a === 'type' || a === 'high'))
-    s = paint([...at(P.body, 0, sink), ...armRects.filter((_, i) => !moving[i]).flat(), ...(legs && !walking ? at(P.legs, 0, sink) : [])])
+    s = paint([...at(P.body, 0, sink), ...armRects.filter((_, i) => !moving[i]).flat(), ...(legs && !stepping ? at(P.legs, 0, sink) : [])])
     arms.forEach((a, i) => {
       if (!moving[i]) return
       const v = a === 'high' ? '0 0;0 -1;0 0;0 0' : i ? '0 1;0 0' : '0 0;0 1'
       s += `<g>${paint(armRects[i])}${aT(c, v, a === 'high' ? 1.2 : typeDur, typeAt)}</g>`
     })
-    if (walking) s += walkLegs(c, at(P.legs, 0, sink), 15 + sink)
+    if (stepping) s += walkLegs(c, at(P.legs, 0, sink), 15 + sink)
   }
   const open = paint(at(P.eyes, lx, ly + sink))
   const dash = paint(P.eyes.map(([x, y, w, h, f]) => [x + lx, y + h - 1 + ly + sink, w, 1, f]))
-  return s + (shut ? dash : blinkAt == null ? open : blink(c, open, dash, 4.2, blinkAt))
+  return shadow + bob(s + (shut ? dash : blinkAt == null ? open : blink(c, open, dash, 4.2, blinkAt)))
 }
 
 // A walker's legs (`legs` rects, the feet on `floor`): the ones left of the middle and those right of it take turns
@@ -808,7 +820,7 @@ function lightMap(ch) {
     }).join('')
   })
 }
-const LIGHT_MAP = Object.fromEntries(AGENT_IDS.map((a) => [a, lightMap(CAST[a])]))
+const LIGHT_MAP = Object.fromEntries(CHARS.map((ch) => [ch.id, lightMap(ch)]))
 // a character's body as its frames draw it: its shadow on the wall, its own colors, the light on them
 function litBody(c, ch, dark) {
   const L = lightOf(c)
@@ -894,10 +906,10 @@ function armSprite(c, shape, side, loop, dark, plain, armsMap = ARM) {
 }
 // Eye shapes: where a character's eyes sit and how far they reach (cast.mjs); most of the cast shares Clawd's.
 const EYE_SHAPES = []
-const EYE_SHAPE = Object.fromEntries(AGENT_IDS.map((a) => {
-  const key = JSON.stringify({ eyes: PARTS[a].eyes.map(([x, y, w, h]) => [x, y, w, h]), reach: CAST[a].reach ?? 2 })
+const EYE_SHAPE = Object.fromEntries(CHARS.map((ch) => {
+  const key = JSON.stringify({ eyes: PARTS[ch.id].eyes.map(([x, y, w, h]) => [x, y, w, h]), reach: ch.reach ?? 2 })
   if (!EYE_SHAPES.includes(key)) EYE_SHAPES.push(key)
-  return [a, EYE_SHAPES.indexOf(key)]
+  return [ch.id, EYE_SHAPES.indexOf(key)]
 }))
 function eyeFrame(g, { look = [0, 0], sink = 0, shut = false }) {
   const { eyes, reach } = JSON.parse(EYE_SHAPES[g])
@@ -1172,7 +1184,7 @@ function onTimeline(c, ch, script, key, x, y) {
  * eyes blinking on their own (art 1) or not (art 2, the lightest); animate=false the still frame alone.
  */
 export function castFigure(ctx, agent, script, key, x, y, { shared } = {}) {
-  const ch = CAST[agentId(agent)]
+  const ch = nightOf(ctx, agent)
   const [b, e] = SCRIPT_STILL[script]
   if (!ctx.animate) return use(ctx, `${ch.tag}-f-${b}`, x, y) + eyesOf(ctx, ch, e, x, y)
   if (ctx.caps?.art) return use(ctx, `${ch.tag}-f-${b}`, x, y) + eyesOf(ctx, ch, e, x, y, ctx.caps.art === 1 && !FIGURE_EYES[e].shut)
@@ -1186,8 +1198,7 @@ defineSprites({
   ...Object.fromEntries(Object.keys(ARM).flatMap((shape) => [0, 1].flatMap((side) => [null, 'A', 'B', 'W'].flatMap((loop) => [false, true].flatMap((dark) =>
     [false, true].map((plain) => [armName(shape, side, loop, dark, plain), (c) => armSprite(c, shape, side, loop, dark, plain)])))))),
   // a character with its own arm shapes (cast.mjs `arms`) gets its own set of arm sprites, keyed by its tag
-  ...Object.fromEntries(AGENT_IDS.filter((a) => CAST[a].arms).flatMap((a) => {
-    const ch = CAST[a]
+  ...Object.fromEntries(CHARS.filter((ch) => ch.arms).flatMap((ch) => {
     const key = `${ch.tag}-`
     const combos = []
     for (const shape of Object.keys(ch.arms))
@@ -1203,9 +1214,8 @@ defineSprites({
     // open eyes that blink by themselves, for a figure drawn without a timeline
     ...(spec.shut ? [] : [[`eye${g}-${n}-b`, (c) => blink(c, eyeFrame(g, spec), eyeFrame(g, { ...spec, shut: true }), 4.2, phase(`eye${g}${n}`, 4.2))]]),
   ]))),
-  ...Object.fromEntries(AGENT_IDS.flatMap((a) => {
-    const ch = CAST[a]
-    const P = PARTS[a]
+  ...Object.fromEntries(CHARS.flatMap((ch) => {
+    const P = PARTS[ch.id]
     return [
       [`${ch.tag}-lit`, (c) => litBody(c, ch, false)],
       [`${ch.tag}-dim`, (c) => litBody(c, ch, true)],

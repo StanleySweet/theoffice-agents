@@ -299,35 +299,31 @@ export const CAST = {
     id: 'vibe', name: 'Vibe', who: 'Vex', tag: 'vb',
     trait: 'a chubby orange tabby with a journal for a memory: keeps every session in one file, runs the shell itself',
     hex: { dark: '#ff8204', light: '#fa500f' }, ansi: '38;5;208', ansi16: '91', term: 'warning',
-    // the Le Chonk pixel cat of mistral.ai (the Mistral Large 4 page, big-cat-icon.svg, 17×15) itself, in
-    // Mistral's own palette, compressed to the 17×10 skeleton — vertically (rows picked) and horizontally
-    // (17 → 12 columns, the least informative ones dropped) so the figure keeps the icon's proportions instead of
-    // going flat — with its alternation kept: ears (row 0), forehead, the icon's three dark pixels on its face
-    // (two eyes E plus the nose E — one group, they move with the look together), the red band as the collar
-    // around its neck (row 4) and the gold pixel as the medal hanging under it (F, row 5), then the body with
-    // the icon's A/C/B dithering and the tail hanging down on its right (inside the body's columns — only the arm
-    // rows may reach the sprite's edges — so cols 12-13 instead of the icon's 15-16), paws on row 9
+    // the Le Chonk pixel cat of mistral.ai (docs.mistral.ai/assets/models/ML4-Lechonk.svg, 17×15) in its own pixels
+    // and palette: columns 3..15 kept (13 = the skeleton's body columns), rows 0-7, 9 and 14 picked for the 10. Ears,
+    // forehead, the three dark pixels of its face (two eyes + nose: one group, they move together), the red collar
+    // (D) with the gold medal (F) under it, the dithered body, its tail hanging down on the right, the floor line.
+    // Four 1-px stub legs on row 8; walking, it floats (`float`) instead of stepping.
     sprite: [
-      '....A...A........',
-      '....AA.AB........',
-      '...ACCCCCB.......',
-      '..AACCECEAB......',
-      '..ACCCCECCB......',
-      '...DDDDDDD.......',
-      '..ACCCFCCCB......',
-      '..BACCCACCCBBB...',
-      '..CCCCCCCCCCBB...',
-      '..BBBBBBBBBBB....',
+      '......A...A......',
+      '......AA.AB......',
+      '.....ACCCCCB.....',
+      '....AACECECAB....',
+      '....ACCCECCCB....',
+      '.....DDDDDDD.....',
+      '....ACCCFCCCB.B..',
+      '....ACACCCAABBB..',
+      '....B.B...B.B.B..',
+      '.................',
     ],
-    // (12 columns of figure: the icon's 17 squeezed horizontally, least informative columns dropped)
     legend: { A: '#ff6529', B: '#fa500f', C: '#ff8204', E: '#ff8204', D: '#e51300', F: '#fec63a' },
-    eyes: 'E', eye: '#171722', arm: '#ff6529', reach: 1, // the three dark pixels (eyes + nose) move together, inside the body
+    eyes: 'E', eye: '#171722', arm: '#ff6529', reach: 1, float: true, // the three dark pixels (eyes + nose) move together, inside the body
     // its own arm shapes: the shared ones stick out of the 25-wide box while its body is narrow, so its arms hug
     // the body (2-px stubs at the body's edge instead of the cast's 3-px at the box's edge)
     arms: {
-      out: [[2, 6, 2, 3]], type: [[2, 6, 2, 3]], droop: [[2, 8, 2, 3]],
-      up: [[2, 6, 2, 3], [2, 1, 2, 5]], high: [[2, 6, 2, 3], [1, 3, 2, 3], [1, 0, 2, 3], [1, -3, 2, 3]],
-      point: [[0, 5, 5, 3]], mouse: [[2, 7, 2, 3]], raise: [[2, 6, 2, 3], [2, -3, 2, 9]],
+      out: [[4, 6, 2, 3]], type: [[4, 6, 2, 3]], droop: [[4, 8, 2, 3]],
+      up: [[4, 6, 2, 3], [4, 1, 2, 5]], high: [[4, 6, 2, 3], [3, 3, 2, 3], [3, 0, 2, 3], [3, -3, 2, 3]],
+      point: [[1, 5, 5, 3]], mouse: [[4, 7, 2, 3]], raise: [[4, 6, 2, 3], [4, -3, 2, 9]],
     },
     mini: ['...A...A...', '..ACCCCB...', '..AECECB...', '..DDDDD....', '..ACCFCCB..', '..BBBBBB...'],
     micro: ['..A.A..', '.AECEA.', 'ADDDDDA', '.ACFCA.', '.BBBBB.'],
@@ -343,3 +339,28 @@ export function agentId(v) {
 
 /** The character of an agent id (Clawd for anything unknown). */
 export const castOf = (v) => CAST[agentId(v)]
+
+/**
+ * The small hours' twins (00:00-04:59 of a live drawing): who is swapped for what. Mistral's hero turns Le Chonk into a
+ * bat cat after dark, and so does Vex: a black cowl with pointed ears and white eyes, a grey-violet body under a
+ * black cape, a gold belt. Same skeleton and arms as the day Vex, its own tag, never an agent of its own (not in AGENT_IDS).
+ */
+export const CAST_NIGHT = {
+  vibe: {
+    ...CAST.vibe, id: 'vibe-bat', tag: 'vbb',
+    legend: { K: '#0b0b12', G: '#35334d', Y: '#f2c14e', E: '#0b0b12' },
+    sprite: [
+      '.....K.....K.....',
+      '.....KK...KK.....',
+      '....KKKKKKKKK....',
+      '....KKKEKEKKK....',
+      '....KKKKKKKKK....',
+      '...KKGGGGGGGKK...',
+      '..KKGGGYYYGGGKK..',
+      '..KKGGGGGGGGGKK..',
+      '....K.K...K.K.K..',
+      '.................',
+    ],
+    arm: '#0b0b12', eye: '#f4efe6', miniEye: '#f4efe6',
+  },
+}

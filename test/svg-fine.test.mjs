@@ -117,6 +117,14 @@ describe('the finer art (ctx.fine)', () => {
     assert.doesNotMatch(drawn(ctxOf(1, { animate: false }), 'cT0').defs, /<animate/)
   })
 
+  test('Vex is a bat cat between 00:00 and 04:59 of a live drawing, never in a replay', () => {
+    const own = (hour, extra = {}) => drawn(ctxOf(1, { f: { now: { hour } }, ...extra }), 'vbT0').own
+    assert.match(own(2), /#to-vbb-lit/)
+    assert.match(own(12), /#to-vb-lit/)
+    assert.match(own(5), /#to-vb-lit/)
+    assert.match(own(2, { view: 'timelapse' }), /#to-vb-lit/)
+  })
+
   test('a replay keeps the day\'s light on its figures, whatever the hour of its facts', () => {
     const rim = FIGURE_LIGHT.night.rim.split('/')[0]
     assert.ok(drawn(ctxOf(1, { night: true }), 'cL').defs.includes(rim), 'a night drawing: the screen\'s rim')
