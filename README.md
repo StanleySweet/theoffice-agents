@@ -30,6 +30,7 @@ It reads the files your agents already write. Nothing leaves your machine.
 | Kimi | **Mooni** | a night owl from the moon: reads the longest docs |
 | Grok | **Rok** | cracks a joke first, keeps its towel handy |
 | GitHub Copilot CLI | **Copi** | the second seat: goggles down, headset on, reads the map while you fly |
+| Mistral Vibe | **Vex** | a chubby orange tabby that keeps every session in one journal, runs the shell itself |
 
 Subagents are **interns**, workflows hold **meetings**, and every account you use (`~/.claude`, `~/.claude-work`, `~/.codex`…) moves into the same building.
 

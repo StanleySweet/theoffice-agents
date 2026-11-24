@@ -1,7 +1,8 @@
 // Node: the office's other tenants. Where each kind of agent keeps its sessions on this machine (its homes: one per
 // account, ~/.claude and ~/.claude-work, ~/.codex and ~/.codex-perso…), and a reader per agent other than Claude
-// (Codex, Gemini CLI and Antigravity, Cursor, Kimi, Grok) that books its sessions into the same per-file cache entries
-// the collector makes of Claude's transcripts (buckets.mjs) and seats the ones at work right now at desks.
+// (Codex, Gemini CLI and Antigravity, Cursor, Kimi, Grok, opencode, omp, Vibe) that books its sessions into the same
+// per-file cache entries the collector makes of Claude's transcripts (buckets.mjs) and seats the ones at work right now
+// at desks.
 // Read-only, always: files are listed, stat'ed and read, never written; nothing here opens a credential file
 // (auth.json, oauth tokens, .key files) or a database.
 import { execFileSync } from 'node:child_process'
@@ -42,6 +43,7 @@ const HOME_SPECS = {
   cursor: { base: '.cursor', marks: ['projects'] },
   grok: { base: '.grok', env: 'GROK_HOME', marks: ['sessions'] },
   omp: { base: '.omp/agent', marks: ['sessions'] },
+  vibe: { base: '.vibe', env: 'VIBE_HOME', marks: ['logs'] },
 }
 const LABEL_RE = /[^a-z0-9_-]+/g
 
@@ -1373,13 +1375,200 @@ const opencode = {
   tail: (abs, size, f) => ({ open: f?.v2 ? (f.busy ?? 0) > (f.idle ?? 0) : true, lastTs: f?.st?.mtimeMs }),
 }
 
+// ---------------------------------------------------------------- Vibe
+
+// Vibe's tool names (qualified, as its hooks payload names them: `file_system.bash`, `mcp_<server>.<tool>`,
+// `connector_<name>_<tool>`) → the Claude tool each does the work of (kindOf and labelOf speak Claude), with its input mapped.
+const VIBE_TOOLS = {
+  'file_system.bash': 'Bash', bash: 'Bash',
+  'process.start': 'Monitor', process_start: 'Monitor', 'process.write': 'Bash', 'process.output': 'TaskOutput',
+  'process.list': 'LS', 'process.stop': 'TaskStop',
+  'file_system.read_file': 'Read', read_file: 'Read', 'file_system.write_file': 'Write', write_file: 'Write',
+  'file_system.edit': 'Edit', edit: 'Edit', 'file_system.list_directory': 'LS', list_directory: 'LS', ls: 'LS',
+  'file_system.glob': 'Glob', glob: 'Glob', 'file_system.grep': 'Grep', grep: 'Grep', 'file_system.search': 'Grep',
+  'skill.read': 'Skill', skill: 'Skill',
+  'agents.spawn': 'Agent', agents_spawn: 'Agent',
+  ask_user_question: 'AskUserQuestion',
+  'todo.write': 'TodoWrite', todo: 'TodoWrite',
+  web_search: 'WebSearch', 'web.fetch': 'WebFetch', fetch: 'WebFetch',
+  'connector_web_search.search': 'WebSearch', 'connector_web_search.open_url': 'WebFetch',
+}
+
+/** One Vibe tool call (an effect entry's `detail`: `toolName` + `input`) → `{ name, input }` in Claude's words. */
+function vibeCall(toolName, rawArgs) {
+  const a = rawArgs && typeof rawArgs === 'object' ? rawArgs : {}
+  const tn = String(toolName ?? '')
+  let name = VIBE_TOOLS[tn] ?? VIBE_TOOLS[tn.split('.').pop()]
+  if (!name && tn.startsWith('mcp_')) {
+    const rest = tn.slice(4)
+    const dot = rest.indexOf('.')
+    name = `mcp__${dot === -1 ? rest : rest.slice(0, dot)}__${(dot === -1 ? 'call' : rest.slice(dot + 1)).replace(/[^A-Za-z0-9_$]/g, '_')}`
+  } else if (!name && tn.startsWith('connector_')) {
+    name = `mcp__connector__${tn.slice(10).replace(/[^A-Za-z0-9_$]/g, '_')}`
+  }
+  name ??= 'mcp__vibe__tool'
+  const file = a.file_path ?? a.path ?? a.file
+  if (name === 'Bash' || name === 'Monitor') return { name, input: { command: String(a.command ?? a.cmd ?? ''), description: a.description } }
+  if (name === 'WebFetch') return { name, input: { url: String(a.url ?? '') } }
+  if (name === 'WebSearch') return { name, input: { query: String(a.query ?? a.q ?? '') } }
+  if (name === 'Skill') return { name, input: { skill: a.name ?? a.skill } }
+  if (name === 'Agent') return { name, input: { description: a.description ?? a.config_name ?? a.name, subagent_type: a.config_name } }
+  if (name === 'AskUserQuestion') return { name, input: { questions: a.questions } }
+  if (name === 'Grep' || name === 'Glob') return { name, input: { pattern: a.pattern ?? a.query } }
+  if (file != null) return { name, input: { file_path: String(file) } }
+  return { name, input: a }
+}
+
+/** The first text of a journal message entry's content (a string, or the first `text` part of an array). */
+function vibeText(content) {
+  if (typeof content === 'string') return content
+  if (Array.isArray(content)) return content.find((p) => p?.type === 'text' && typeof p.text === 'string')?.text ?? null
+  return null
+}
+
+/**
+ * One `projection_delta` op of a Vibe journal line booked into a collector entry. The unified store's journal
+ * (`logs/session/unified/<sid>/journal/*.jsonl`) holds every event as a record whose `projection_delta` payload
+ * projects the transcript: `append_entry`/`replace_entry` ops with a `message` (the prompts), `reasoning` or `effect`
+ * (the tool calls, `detail.kind === 'tool'` with `detail.toolName`/`detail.input` and a `state.status`) entry, each
+ * stamped (`createdAt`/`updatedAt`, epoch ms).
+ */
+function vibeDelta(e, d, seen) {
+  const en = d?.entry
+  if (!en || typeof en !== 'object') return
+  const ts = msOf(en.createdAt ?? en.updatedAt)
+  if (!Number.isFinite(ts)) return
+  const isTool = en.type === 'effect' && en.detail?.kind === 'tool'
+  const id = isTool ? en.toolCallId ?? en.id : null
+  if (isTool) {
+    if (seen.has(id)) return
+    seen.add(id)
+  }
+  const prev = e.prev
+  const b = touch(e, ts)
+  if (!b) return
+  if (e.cwd0 && prev != null && ts > prev) {
+    const gap = Math.min(ts - prev, GAP_MS)
+    if (gap > 0) {
+      const day = touchedDay()
+      const byDay = ((e.cm ??= {})[e.cwd0] ??= {})
+      byDay[day] = (byDay[day] ?? 0) + gap
+    }
+  }
+  if (en.type === 'message' && en.role === 'user') {
+    if (e.kind === 'main') b.p++
+    // no title of its own yet (meta.json's `title` may stay null until the background call names the session): the
+    // first line of the first prompt, as omp's sessions are named
+    if (e.kind === 'main' && !e.ct) {
+      const line = vibeText(en.content)?.split('\n').find((l) => l.trim())
+      if (line) e.ct = clip(redact(line.trim()), 80)
+    }
+  } else if (isTool) {
+    const t = vibeCall(en.detail.toolName, en.detail.input)
+    bookTool(e, b, t.name, t.input)
+  }
+}
+
+function vibeLines(e) {
+  const seen = new Set()
+  return (buf, s, end) => {
+    const o = parseLine(buf, s, end)
+    if (!o || o.type !== 'projection_delta' || !Array.isArray(o.payload?.delta)) return
+    for (const d of o.payload.delta) vibeDelta(e, d, seen)
+  }
+}
+
+/**
+ * The tail of a Vibe journal as a desk's tail: the last tool call still `running` (no settled `replace_entry`) is
+ * pending, and a session whose `meta.json` records an `end_time` has said its last word (`over`, the coat rack).
+ */
+function vibeTail(lines, abs) {
+  const t = { open: true, pending: null, lastTs: NaN }
+  const calls = new Map()
+  for (const o of lines) {
+    if (o?.type !== 'projection_delta' || !Array.isArray(o.payload?.delta)) continue
+    for (const d of o.payload.delta) {
+      const en = d?.entry
+      if (!en || typeof en !== 'object' || en.type !== 'effect' || en.detail?.kind !== 'tool') continue
+      const ts = msOf(en.createdAt ?? en.updatedAt)
+      if (Number.isFinite(ts) && ts > (t.lastTs || 0)) t.lastTs = ts
+      const id = en.toolCallId ?? en.id
+      const status = String(en.state?.status ?? '')
+      if (d.op === 'append_entry' || /^(running|pending|waiting)$/.test(status)) {
+        const c = vibeCall(en.detail.toolName, en.detail.input)
+        calls.set(id, pendingOf(c.name, c.input, ts))
+      } else if (/complete|fail|error|cancel|denied/.test(status)) {
+        calls.delete(id)
+      }
+    }
+  }
+  t.pending = [...calls.values()].pop() ?? null
+  // a session whose meta.json says it is archived, or whose active lock (`logs/session/active/<sid>.lock`) is gone,
+  // has closed cleanly and said its last word; one whose lock lingers after a crash still leaves with its process
+  const sDir = path.dirname(path.dirname(abs))
+  try {
+    const meta = readJson(path.join(sDir, 'meta.json'))
+    if (meta?.archived_at) t.over = true
+  } catch {}
+  if (!t.over) t.over = !statSafe(path.join(path.dirname(path.dirname(sDir)), 'active', `${path.basename(sDir)}.lock`))
+  return t
+}
+
+/**
+ * Vibe (`~/.vibe`, `VIBE_HOME`…): one folder per session under `logs/session/unified/<sid>/`, holding `meta.json`
+ * (its `environment.working_directory`, `title`, `config.active_model`, `parent_session_id` for a subagent,
+ * `start_time`/`end_time`) and the appended journal `journal/*.jsonl` read line by line (vibeLines). A session with
+ * several journal files is walked whole (all its files are read, merged by sid), but only its newest one sits at a
+ * desk (`noDesk` on the others).
+ */
+const vibe = {
+  id: 'vibe',
+  walk(ctx, home) {
+    const out = []
+    const unified = path.join('logs', 'session', 'unified')
+    for (const s of readdirSafe(path.join(home.dir, unified))) {
+      if (!s.isDirectory()) continue
+      const sRel = path.join(unified, s.name)
+      ctx.listedKey(home, sRel)
+      const jRel = path.join(sRel, 'journal')
+      ctx.listedKey(home, jRel)
+      const js = readdirSafe(path.join(home.dir, jRel)).filter((f) => f.isFile() && f.name.endsWith('.jsonl')).sort((a, b) => a.name.localeCompare(b.name))
+      js.forEach((j, i) => {
+        const rel = path.join(jRel, j.name)
+        const st = statSafe(path.join(home.dir, rel))
+        if (st) out.push({ rel, st, sid: s.name, noDesk: i < js.length - 1, ...(st.birthtimeMs > 0 ? { began: st.birthtimeMs } : {}) })
+      })
+    }
+    return out
+  },
+  init(f, ctx, home) {
+    const meta = readJson(path.join(home.dir, path.dirname(path.dirname(f.rel)), 'meta.json')) ?? {}
+    const sub = typeof meta.parent_session_id === 'string' && meta.parent_session_id
+    const e = { kind: sub ? 'sub' : 'main', sid: f.sid, cwds: {}, models: {}, days: {} }
+    if (sub) e.par = meta.parent_session_id
+    const cwd = meta.environment?.working_directory ?? meta.origin_directory ?? meta.cwd
+    if (typeof cwd === 'string' && path.isAbsolute(cwd)) {
+      e.cwd0 = cwd
+      e.cwds[cwd] = 10
+    }
+    const title = meta.title
+    if (!sub && typeof title === 'string' && title.trim()) e.ct = clip(redact(title), 80)
+    addModel(e, meta.config?.active_model ?? meta.config?.model_name)
+    return e
+  },
+  lines: (e) => vibeLines(e),
+  // a live desk: busy while the journal keeps being written, idle once it stalls (liveState); a session whose
+  // meta.json ended goes to the coat rack (over)
+  tail: (abs, size) => vibeTail(tailLines(abs, size), abs),
+}
+
 /** The readers, by agent id (Claude's sessions are read by collect.mjs itself). */
-export const READERS = { codex, gemini, cursor, kimi, grok, opencode, omp }
+export const READERS = { codex, gemini, cursor, kimi, grok, opencode, omp, vibe }
 
 // ---------------------------------------------------------------- liveness by working directory
 
 /** Agents with no pid file: the executable names of their processes (one place to extend). */
-const HOST_EXES = { opencode: ['opencode'], omp: ['omp'], copilot: ['copilot'], codex: ['codex'] }
+const HOST_EXES = { opencode: ['opencode'], omp: ['omp'], copilot: ['copilot'], codex: ['codex'], vibe: ['vibe', 'mistral-vibe', 'vibe-rs', 'vibe-app-server', 'vibe-background'] }
 const LAUNCHERS = new Set(['node', 'bun', 'deno'])
 const realDir = (d) => { const t = String(d).replace(/[\\/]+$/, '') || '/'; try { return fs.realpathSync(t) } catch { return t } }
 const exeName = (tok) => path.basename(tok ?? '').replace(/\.exe$/i, '')
@@ -1521,7 +1710,7 @@ export async function readOtherAgents(ctx, homes) {
     }
     for (const f of recent) {
       const e = byKey.get(f.key)
-      if (!e || e.kind !== 'main') continue
+      if (!e || e.kind !== 'main' || f.noDesk) continue
       titles ??= reader.titles ? reader.titles(home) : new Map()
       const title = titles.get(e.sid) ?? e.ct ?? e.at ?? null
       const proj = ctx.resolver.resolve(topCwd(e) ?? '')

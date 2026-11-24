@@ -23,6 +23,7 @@ Every account you use moves into the same building, each agent as its own charac
 | Kimi | **Mooni**, a night owl from the moon: reads the longest docs |
 | Grok | **Rok**, cracks a joke first, keeps its towel handy |
 | GitHub Copilot CLI | **Copi**, the second seat: goggles down, headset on, reads the map while you fly |
+| Mistral Vibe | **Vex**, a chubby orange tabby with a journal for a memory |
 
 Subagents are **interns** and workflows hold **meetings**.
 

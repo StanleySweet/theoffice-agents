@@ -76,7 +76,7 @@ describe('liveness by working directory', () => {
     try { assert.equal(liveHostCwds(ctx), null); assert.equal(hostAlive(ctx, 'codex', app), true) } finally { Object.defineProperty(process, 'platform', { value: prev }) }
     // no process of any host at all is a real answer: everything finished
     const m = liveHostCwds({ procTable: [proc('/bin/zsh', '/')] })
-    assert.deepEqual([...m.keys()].sort(), ['codex', 'copilot', 'omp', 'opencode'])
+    assert.deepEqual([...m.keys()].sort(), ['codex', 'copilot', 'omp', 'opencode', 'vibe'])
     assert.ok([...m.values()].every((s) => s.size === 0))
   })
 })

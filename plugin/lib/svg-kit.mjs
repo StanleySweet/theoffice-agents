@@ -573,6 +573,7 @@ const mirror = (rs) => rs.map(([x, y, w, h]) => [25 - x - w, y, w, h])
 export function figure(c, agent, { look = [0, 0], shut = false, arms = ['out', 'out'], legs = false, sink = 0, blinkAt = null, typeDur = 0.5, typeAt = 0, lit = false } = {}) {
   const ch = CAST[agentId(agent)]
   const P = PARTS[ch.id]
+  const ARMS = ch.arms ?? ARM // a character may bring its own arm shapes (a narrow body wants narrow arms)
   const reach = ch.reach ?? 2
   const [lx, ly] = look.map((v) => Math.max(-reach, Math.min(reach, v)))
   const armFill = [].concat(ch.arm)
@@ -585,7 +586,7 @@ export function figure(c, agent, { look = [0, 0], shut = false, arms = ['out', '
     // pair and a waving hand on the shared rhythms; its legs. `lit`: its shadow on the ground under its feet too.
     const plain = Boolean(c.caps?.art)
     const loop = (a, side) => (!c.animate ? null : a === 'type' ? (typeAt ? 'B' : 'A') : a === 'high' && side ? 'W' : null)
-    const arm = (side) => use(c, armName(arms[side] === 'type' ? 'out' : arms[side], side, loop(arms[side], side), shut, plain), 0, sink, ` color="${armFill[side] ?? armFill[0]}"`)
+    const arm = (side) => use(c, armName(arms[side] === 'type' ? 'out' : arms[side], side, loop(arms[side], side), shut, plain, ch.arms ? `${ch.tag}-` : ''), 0, sink, ` color="${armFill[side] ?? armFill[0]}"`)
     s = (lit ? paint([[5, 15 + sink, 18, 1, '#000/.3']]) : '') + use(c, `${ch.tag}-${shut ? 'dim' : 'lit'}`, 0, sink) +
       (legs ? use(c, `${ch.tag}-${walking ? 'walk' : 'legs'}`, 0, sink) : '') + arm(0) + arm(1)
     // its eyes the cast's too, where its look is one of the live floors' (FIGURE_EYES): they blink by themselves
@@ -595,7 +596,7 @@ export function figure(c, agent, { look = [0, 0], shut = false, arms = ['out', '
     })
     if (eyes) return s + eyesOf(c, ch, eyes, 0, 0, c.animate && blinkAt != null && !shut)
   } else {
-    const armRects = arms.map((a, side) => at(side ? mirror(ARM[a]) : ARM[a], 0, sink, armFill[side] ?? armFill[0]))
+    const armRects = arms.map((a, side) => at(side ? mirror(ARMS[a]) : ARMS[a], 0, sink, armFill[side] ?? armFill[0]))
     const moving = arms.map((a) => c.animate && (a === 'type' || a === 'high'))
     s = paint([...at(P.body, 0, sink), ...armRects.filter((_, i) => !moving[i]).flat(), ...(legs && !walking ? at(P.legs, 0, sink) : [])])
     arms.forEach((a, i) => {
@@ -881,12 +882,12 @@ function bodyFrame(c, ch, spec) {
   const fills = [].concat(ch.arm)
   // a lighter drawing's figures stand still: their arms take no light
   const plain = Boolean(c.caps?.art)
-  const arm = (side) => use(c, armName(spec.arms[side], side, spec.loop?.[side], spec.dark, plain), 0, sink, ` color="${fills[side] ?? fills[0]}"`)
+  const arm = (side) => use(c, armName(spec.arms[side], side, spec.loop?.[side], spec.dark, plain, ch.arms ? `${ch.tag}-` : ''), 0, sink, ` color="${fills[side] ?? fills[0]}"`)
   return use(c, `${ch.tag}-${spec.dark ? 'dim' : 'lit'}`, 0, sink) + (spec.legs ? use(c, `${ch.tag}-legs`, 0, sink) : '') + arm(0) + arm(1)
 }
-const armName = (shape, side, loop, dark, plain) => `arm-${shape}${side}${loop ?? ''}${dark ? 'd' : ''}${plain ? 'p' : ''}`
-function armSprite(c, shape, side, loop, dark, plain) {
-  const rs = (side ? mirror(ARM[shape]) : ARM[shape]).map(([x, y, w, h]) => [x, y, w, h, 'cur'])
+const armName = (shape, side, loop, dark, plain, key = '') => `arm-${key}${shape}${side}${loop ?? ''}${dark ? 'd' : ''}${plain ? 'p' : ''}`
+function armSprite(c, shape, side, loop, dark, plain, armsMap = ARM) {
+  const rs = (side ? mirror(armsMap[shape]) : armsMap[shape]).map(([x, y, w, h]) => [x, y, w, h, 'cur'])
   const m = paint(rs) + (plain ? '' : paint(armLight(rs, side, lightOf(c), dark)))
   const t = rhythm(c, loop, side)
   return t ? `<g>${m}${t}</g>` : m
@@ -1184,6 +1185,19 @@ defineSprites({
   'fig-clip': (c) => `<clipPath id="${c.id}fig-clip-p"><rect x="-10" y="-10" width="46" height="31"/></clipPath>`,
   ...Object.fromEntries(Object.keys(ARM).flatMap((shape) => [0, 1].flatMap((side) => [null, 'A', 'B', 'W'].flatMap((loop) => [false, true].flatMap((dark) =>
     [false, true].map((plain) => [armName(shape, side, loop, dark, plain), (c) => armSprite(c, shape, side, loop, dark, plain)])))))),
+  // a character with its own arm shapes (cast.mjs `arms`) gets its own set of arm sprites, keyed by its tag
+  ...Object.fromEntries(AGENT_IDS.filter((a) => CAST[a].arms).flatMap((a) => {
+    const ch = CAST[a]
+    const key = `${ch.tag}-`
+    const combos = []
+    for (const shape of Object.keys(ch.arms))
+      for (const side of [0, 1])
+        for (const loop of [null, 'A', 'B', 'W'])
+          for (const dark of [false, true])
+            for (const plain of [false, true])
+              combos.push([armName(shape, side, loop, dark, plain, key), (c) => armSprite(c, shape, side, loop, dark, plain, ch.arms)])
+    return combos
+  })),
   ...Object.fromEntries(EYE_SHAPES.flatMap((_, g) => Object.entries(FIGURE_EYES).flatMap(([n, spec]) => [
     [`eye${g}-${n}`, () => eyeFrame(g, spec)],
     // open eyes that blink by themselves, for a figure drawn without a timeline

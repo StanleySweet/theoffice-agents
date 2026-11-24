@@ -144,6 +144,34 @@ before(async () => {
     { timestamp: ago(40e3), update: { sessionUpdate: 'tool_call', toolCallId: 'g2', kind: 'read', title: 'Read a.js', locations: [{ path: path.join(app, 'a.js') }] } },
   ], NOW - 40e3)
 
+  // ---- Vibe: a live unified session with a read pending; meta.json holds its cwd, title and model, the journal its turns
+  const vibeSid = '71be0000-0000-4000-8000-0000000000be'
+  const vibeDir = path.join(root, '.vibe', 'logs', 'session', 'unified', vibeSid)
+  const vj = (seq, entry, op = 'append_entry') => ({ type: 'projection_delta', sequence: seq, payload: { delta: [{ op, entry }] } })
+  const vtool = (id, at, toolName, input, status) => vj(0, {
+    type: 'effect', id: `effect-${id}`, toolCallId: `call-${id}`, createdAt: at, updatedAt: at,
+    detail: { kind: 'tool', toolName, input }, state: { status },
+  }, status === 'running' ? 'append_entry' : 'replace_entry')
+  writeJson(path.join(vibeDir, 'meta.json'), {
+    session_id: vibeSid,
+    parent_session_id: null,
+    start_time: new Date(ago(900e3)).toISOString(),
+    end_time: null,
+    environment: { working_directory: app },
+    title: 'Vibe at work',
+    config: { active_model: 'mistral-large-4-0' },
+  }, NOW - 40e3)
+  // its active lock: a running session holds one under logs/session/active/
+  fs.mkdirSync(path.join(root, '.vibe', 'logs', 'session', 'active'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.vibe', 'logs', 'session', 'active', `${vibeSid}.lock`), '')
+  writeLines(path.join(vibeDir, 'journal', '0000000000000001.jsonl'), [
+    vj(1, { type: 'message', role: 'user', id: 'rs-1', createdAt: ago(900e3), updatedAt: ago(900e3), content: [{ type: 'text', text: 'go\nbuild it' }] }),
+    vtool(1, ago(880e3), 'file_system.bash', { command: 'npm run build', description: 'Build' }, 'running'),
+    vtool(1, ago(860e3), 'file_system.bash', { command: 'npm run build', description: 'Build' }, 'completed'),
+    vj(3, { type: 'reasoning', id: 'r-1', createdAt: ago(850e3), updatedAt: ago(850e3), content: [{ type: 'text', text: 'hmm' }] }),
+    vtool(2, ago(50e3), 'file_system.read_file', { file_path: path.join(app, 'a.js') }, 'running'),
+  ], NOW - 40e3)
+
   week = await collect({ view: 'week', home: root, cacheDir: null, now: FROZEN, novi: false, git: false })
 })
 after(() => cleanup(root))
@@ -160,6 +188,7 @@ describe('accounts: every agent home on the machine', () => {
     assert.deepEqual(by('cursor'), [['.cursor', null, '@cursor/']])
     assert.deepEqual(by('grok'), [['.grok', null, '@grok/']])
     assert.deepEqual(by('kimi'), [['.kimi-code', null, '@kimi/']])
+    assert.deepEqual(by('vibe'), [['.vibe', null, '@vibe/']])
   })
 
   test('a Claude folder given explicitly is read alone; `agents` limits the agents', () => {
@@ -170,7 +199,7 @@ describe('accounts: every agent home on the machine', () => {
 
   test('the facts list the accounts that worked in the range or have a desk (a home with nothing to show is left out)', () => {
     const acc = week.accounts.map((a) => `${a.agent}${a.label ? `@${a.label}` : ''}`).sort()
-    assert.deepEqual(acc, ['claude@main', 'claude@work', 'codex@main', 'cursor', 'gemini', 'grok', 'kimi'])
+    assert.deepEqual(acc, ['claude@main', 'claude@work', 'codex@main', 'cursor', 'gemini', 'grok', 'kimi', 'vibe'])
     const work = week.accounts.find((a) => a.label === 'work')
     assert.equal(work.live, 1)
     assert.ok(work.minutes > 0)
@@ -180,7 +209,7 @@ describe('accounts: every agent home on the machine', () => {
 describe('live: every agent at its own desk', () => {
   test('one desk per live session, each with its agent and, where the agent has several, its account', () => {
     const got = week.live.desks.map((d) => `${d.agent}:${d.account ?? '-'}`).sort()
-    assert.deepEqual(got, ['claude:main', 'claude:work', 'codex:main', 'cursor:-', 'gemini:-', 'grok:-'])
+    assert.deepEqual(got, ['claude:main', 'claude:work', 'codex:main', 'cursor:-', 'gemini:-', 'grok:-', 'vibe:-'])
   })
 
   test('Codex: an open turn running `npm test` is testing; its fresh subagent is an intern; its title from the index', () => {
@@ -211,6 +240,37 @@ describe('live: every agent at its own desk', () => {
     assert.equal(d.activity.kind, 'reading')
     assert.equal(d.title, 'Grok it')
     assert.equal(d.model, 'grok-5-build')
+  })
+
+  test('Vibe: a journal read still running is reading; cwd, title and model from meta.json; the settled call is not pending', () => {
+    const d = deskOf('vibe')
+    assert.equal(d.state, 'working')
+    assert.equal(d.activity.kind, 'reading')
+    assert.equal(d.activity.tool, 'Read')
+    assert.equal(d.activity.label, 'a.js')
+    assert.equal(d.title, 'Vibe at work')
+    assert.equal(d.model, 'mistral-large-4-0')
+    assert.equal(d.project, 'app')
+    assert.equal(d.interns.length, 0)
+  })
+
+  test('Vibe: a session whose active lock is gone has said its last word: no desk, on the coat rack', async () => {
+    const r4 = fs.mkdtempSync(path.join(os.tmpdir(), 'theoffice-vibe-'))
+    try {
+      const sid = '71be0000-0000-4000-8000-0000000000ff'
+      const dir = path.join(r4, '.vibe', 'logs', 'session', 'unified', sid)
+      const cwd = path.join(r4, 'work', 'app')
+      fs.mkdirSync(cwd, { recursive: true })
+      writeJson(path.join(dir, 'meta.json'), { session_id: sid, environment: { working_directory: cwd }, title: 'Gone' }, NOW - 120e3)
+      writeLines(path.join(dir, 'journal', '0000000000000001.jsonl'), [
+        { type: 'projection_delta', sequence: 1, payload: { delta: [{ op: 'append_entry', entry: { type: 'message', role: 'user', id: 'rs-1', createdAt: ago(300e3), updatedAt: ago(300e3), content: [{ type: 'text', text: 'go' }] } }] } },
+      ], NOW - 120e3)
+      const f = await collect({ view: 'live', home: r4, cacheDir: null, now: FROZEN, novi: false, git: false, agents: 'vibe' })
+      assert.deepEqual(f.live.desks.map((d) => d.agent), [], 'no desk without the lock')
+      assert.deepEqual(f.live.recently_left.map((l) => [l.agent, l.title]), [['vibe', 'Gone']])
+    } finally {
+      cleanup(r4)
+    }
   })
 
   test('an idle desk says why: Codex done, aborted (stopped) or left open and quiet (stalled); an Antigravity error', async () => {
@@ -298,25 +358,26 @@ describe('live: every agent at its own desk', () => {
 describe('history: every agent books into the same projects', () => {
   test("the project's agent-time is split by agent, and the totals add it up", () => {
     const p = week.projects.find((x) => x.name === 'app')
-    for (const a of ['claude', 'codex', 'gemini', 'cursor', 'kimi', 'grok']) assert.ok(p.agents[a] > 0, `${a} worked on app: ${JSON.stringify(p.agents)}`)
+    for (const a of ['claude', 'codex', 'gemini', 'cursor', 'kimi', 'grok', 'vibe']) assert.ok(p.agents[a] > 0, `${a} worked on app: ${JSON.stringify(p.agents)}`)
     assert.equal(Object.values(p.agents).reduce((s, m) => s + m, 0) - p.agent_minutes <= 6, true, 'the split adds up to the agent-time (rounding)')
-    assert.deepEqual(Object.keys(week.totals.agents).sort(), ['claude', 'codex', 'cursor', 'gemini', 'grok', 'kimi'])
+    assert.deepEqual(Object.keys(week.totals.agents).sort(), ['claude', 'codex', 'cursor', 'gemini', 'grok', 'kimi', 'vibe'])
     assert.equal(week.projects.filter((x) => /^[0-9a-f-]{36}$/.test(x.name)).length, 0, 'no project named after a conversation folder')
   })
 
   test('tool calls by kind: Codex code mode, apply_patch and the archive, Kimi, the Gemini CLI, Cursor, Grok', () => {
     const p = week.projects.find((x) => x.name === 'app')
     // codex: build (terminal), patch (coding), npm test (testing), archived ls (terminal); its subagent's rg (terminal);
-    // kimi: Bash, StrReplaceFile; gemini cli: npm test; antigravity: read_file, write_file; cursor: Read, Shell; grok: execute, read
+    // kimi: Bash, StrReplaceFile; gemini cli: npm test; antigravity: read_file, write_file; cursor: Read, Shell; grok: execute, read;
+    // vibe: npm run build (terminal), file_system.read_file (reading)
     assert.ok(p.activity.testing >= 2, JSON.stringify(p.activity))
     assert.ok(p.activity.coding >= 3, JSON.stringify(p.activity))
-    assert.ok(p.activity.terminal >= 5, JSON.stringify(p.activity))
-    assert.ok(p.activity.reading >= 3, JSON.stringify(p.activity))
+    assert.ok(p.activity.terminal >= 6, JSON.stringify(p.activity))
+    assert.ok(p.activity.reading >= 4, JSON.stringify(p.activity))
     assert.ok(p.files_edited >= 2)
     assert.ok(p.subagents >= 1)
     assert.ok(week.per_day['2026-10-24'].sessions >= 2, 'the archived Codex rollout and the Gemini CLI chat count on Saturday')
     assert.ok(week.per_day['2026-10-25'].minutes > 0, "Kimi's session counts on Sunday")
-    assert.ok(p.models['gpt-6.1-sol'] && p.models['gemini-3-pro'] && p.models['kimi-k3'] && p.models['grok-5-build'])
+    assert.ok(p.models['gpt-6.1-sol'] && p.models['gemini-3-pro'] && p.models['kimi-k3'] && p.models['grok-5-build'] && p.models['mistral-large-4-0'])
   })
 
   test('an archive longer than what is unpacked at a time loses no line at its seams, nor its last one', async () => {
@@ -401,7 +462,7 @@ describe('history: every agent books into the same projects', () => {
       assert.deepEqual(warm.totals.agents, cold.totals.agents)
       assert.deepEqual(warm.totals.agents, week.totals.agents)
       const keys = Object.keys(JSON.parse(fs.readFileSync(path.join(cacheDir, 'cache-v1.json'), 'utf8')).files)
-      for (const p of ['@codex/', '@gemini/', '@cursor/', '@kimi/', '@grok/', '@claude.work/']) assert.ok(keys.some((k) => k.startsWith(p)), `${p} in ${keys.join(', ')}`)
+      for (const p of ['@codex/', '@gemini/', '@cursor/', '@kimi/', '@grok/', '@vibe/', '@claude.work/']) assert.ok(keys.some((k) => k.startsWith(p)), `${p} in ${keys.join(', ')}`)
       assert.ok(keys.some((k) => k.startsWith(enc(app))), "~/.claude's own keys keep no prefix (a cache from before accounts stays valid)")
     } finally {
       cleanup(cacheDir)
@@ -465,7 +526,7 @@ describe('history: every agent books into the same projects', () => {
 
   test('the desktop pane is told which files to watch: the live sessions of the other agents', () => {
     const w = week.sources.watch
-    assert.ok(w.some((p) => p.includes('.codex')) && w.some((p) => p.includes('.grok')) && w.some((p) => p.includes('.cursor')))
+    assert.ok(w.some((p) => p.includes('.codex')) && w.some((p) => p.includes('.grok')) && w.some((p) => p.includes('.cursor')) && w.some((p) => p.includes('.vibe')))
     assert.ok(w.every((p) => path.isAbsolute(p)))
   })
 
